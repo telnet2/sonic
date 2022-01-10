@@ -42,4 +42,6 @@ func WithCompileRecursiveDepth(depth int) CompileOption {
             o.RecursiveDepth = depth
         }
 }
- 
+
+// DefaultEncodeBufferSize sets the default buffer size for encoder
+var DefaultEncodeBufferSize uint = 4 * 1024

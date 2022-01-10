@@ -18,20 +18,21 @@ package encoder
 
 import (
     `bytes`
+    `errors`
     `sync`
     `unsafe`
-    `errors`
 
     `github.com/bytedance/sonic/internal/caching`
     `github.com/bytedance/sonic/internal/rt`
+    `github.com/bytedance/sonic/option`
 )
 
 const (
     _MaxStack  = 65536      // 64k states
-    _MaxBuffer = 1048576    // 1MB buffer size
-
     _StackSize = unsafe.Sizeof(_Stack{})
 )
+
+var _MaxBuffer = option.DefaultEncodeBufferSize  
 
 var (
     bytesPool    = sync.Pool{}
