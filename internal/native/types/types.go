@@ -18,6 +18,11 @@ package types
 
 import (
     `fmt`
+    `reflect`
+    `unsafe`
+
+    `github.com/bytedance/sonic/internal/rt`
+    `github.com/bytedance/sonic/option`
 )
 
 type ValueType int
@@ -49,10 +54,6 @@ const (
 const (
     F_DOUBLE_UNQUOTE  = 1 << B_DOUBLE_UNQUOTE
     F_UNICODE_REPLACE = 1 << B_UNICODE_REPLACE
-)
-
-const (
-    MAX_RECURSE = 65536
 )
 
 const (
@@ -99,7 +100,42 @@ type JsonState struct {
     Dcap int
 }
 
+const _ThresholdGrow = 65536
+
+var typeVt = rt.UnpackType(reflect.TypeOf(int(0)))
+
+//go:linkname growslice runtime.growslice
+//goland:noinspection GoUnusedParameter
+func growslice(et *rt.GoType, old rt.GoSlice, cap int) rt.GoSlice
+
 type StateMachine struct {
     Sp int
-    Vt [MAX_RECURSE]int
+    Vt []int
+}
+
+func NewStateMachine() StateMachine {
+    return StateMachine{
+        Sp: 0,
+        Vt: make([]int, option.MaxDecodeJSONDepth),
+    }
+}
+
+func (st *StateMachine) Reset() {
+    st.Sp = 0
+    st.Vt = st.Vt[:0]
+}
+
+func (st *StateMachine) Grow() {
+    exp := cap(st.Vt) * 2
+    if exp > _ThresholdGrow {
+        exp -= exp / 4
+    }
+    if exp == 0 {
+        exp = int(option.MaxDecodeJSONDepth)
+    }
+
+    op := (*rt.GoSlice)(unsafe.Pointer(&st.Vt))
+    np := growslice(typeVt, *op, exp)
+    op.Cap = exp
+    op.Ptr = np.Ptr
 }

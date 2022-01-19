@@ -71,8 +71,8 @@ import (
 const (
     _FP_args   = 96     // 96 bytes to pass arguments and return values for this function
     _FP_fargs  = 80     // 80 bytes for passing arguments to other Go functions
-    _FP_saves  = 40     // 40 bytes for saving the registers before CALL instructions
-    _FP_locals = 88    // 88 bytes for local variables
+    _FP_saves  = 120     // 40 bytes for saving the registers before CALL instructions
+    _FP_locals = 96    // 96 bytes for local variables
 )
 
 const (
@@ -139,6 +139,7 @@ var (
 
 var (
     _R10 = jit.Reg("R10")    // used for gcWriteBarrier
+    _R11 = jit.Reg("R11")    
     _DF  = jit.Reg("R10")    // reuse R10 in generic decoder for flags
     _ET  = jit.Reg("R10")
     _EP  = jit.Reg("R11")
@@ -188,6 +189,8 @@ var (
     _VAR_ss_SI = jit.Ptr(_SP, _FP_fargs + _FP_saves + 64)
     _VAR_ss_R8 = jit.Ptr(_SP, _FP_fargs + _FP_saves + 72)
     _VAR_ss_R9 = jit.Ptr(_SP, _FP_fargs + _FP_saves + 80)
+
+    _VAR_sf_IC = jit.Ptr(_SP, _FP_fargs + _FP_saves + 88)
 )
 
 type _Assembler struct {
@@ -334,13 +337,9 @@ func (self *_Assembler) prologue() {
 
 /** Function Calling Helpers **/
 
-var _REG_go = []obj.Addr {
-    _ST,
-    _VP,
-    _IP,
-    _IL,
-    _IC,
-}
+var (
+    _REG_go  = []obj.Addr { _ST, _VP, _IP, _IL, _IC }
+)
 
 func (self *_Assembler) save(r ...obj.Addr) {
     for i, v := range r {
@@ -379,7 +378,6 @@ func (self *_Assembler) call_sf(fn obj.Addr) {
     self.Emit("LEAQ", _ARG_ic, _SI)                     // LEAQ ic<>+16(FP), SI
     self.Emit("LEAQ", jit.Ptr(_ST, _FsmOffset), _DX)    // LEAQ _FsmOffset(ST), DX
     self.call(fn)                                       // CALL ${fn}
-    self.Emit("MOVQ", _ARG_ic, _IC)                     // MOVQ ic<>+16(FP), IC
 }
 
 func (self *_Assembler) call_vf(fn obj.Addr) {
@@ -863,11 +861,27 @@ func (self *_Assembler) mapassign_utext(t reflect.Type, addressable bool) {
 /** External Unmarshaler Routines **/
 
 var (
+    typesFsm = types.StateMachine{}
     _F_skip_one = jit.Imm(int64(native.S_skip_one))
+    _F_grow_stack = jit.Func(growStack)
 )
 
+func (self *_Assembler) skip_func(fn obj.Addr) {
+    self.Link("_skip_{n}")
+    self.call_sf(fn)                                   // CALL_SF   skip_one
+    self.Emit("CMPQ", _AX, jit.Imm(-int64(types.ERR_RECURSE_EXCEED_MAX)))
+    self.Sjmp("JNE", "_skip_end_{n}")
+    self.Emit("MOVQ", _IC, _VAR_sf_IC)
+    self.Emit("MOVQ", _ST, jit.Ptr(_SP, 0))
+    self.call_go(_F_grow_stack)
+    self.Emit("MOVQ", _VAR_sf_IC, _IC)
+    self.Sjmp("JMP" , "_skip_{n}")
+    self.Link("_skip_end_{n}")
+    self.Emit("MOVQ", _ARG_ic, _IC)                     // MOVQ ic<>+16(FP), IC
+}
+
 func (self *_Assembler) unmarshal_json(t reflect.Type, deref bool) {
-    self.call_sf(_F_skip_one)                                   // CALL_SF   skip_one
+    self.skip_func(_F_skip_one)
     self.Emit("TESTQ", _AX, _AX)                                // TESTQ     AX, AX
     self.Sjmp("JS"   , _LB_parsing_error_v)                     // JS        _parse_error_v
     self.slice_from_r(_AX, 0)                                   // SLICE_R   AX, $0
@@ -1335,7 +1349,7 @@ func (self *_Assembler) _asm_OP_map_key_utext_p(p *_Instr) {
 }
 
 func (self *_Assembler) _asm_OP_array_skip(_ *_Instr) {
-    self.call_sf(_F_skip_array)                 // CALL_SF skip_array
+    self.skip_func(_F_skip_array)                 // CALL_SF skip_array
     self.Emit("TESTQ", _AX, _AX)                // TESTQ   AX, AX
     self.Sjmp("JS"   , _LB_parsing_error_v)     // JS      _parse_error_v
 }
@@ -1396,13 +1410,13 @@ func (self *_Assembler) _asm_OP_slice_append(p *_Instr) {
 }
 
 func (self *_Assembler) _asm_OP_object_skip(_ *_Instr) {
-    self.call_sf(_F_skip_object)                // CALL_SF skip_object
+    self.skip_func(_F_skip_object)                // CALL_SF skip_object
     self.Emit("TESTQ", _AX, _AX)                // TESTQ   AX, AX
     self.Sjmp("JS"   , _LB_parsing_error_v)     // JS      _parse_error_v
 }
 
 func (self *_Assembler) _asm_OP_object_next(_ *_Instr) {
-    self.call_sf(_F_skip_one)                   // CALL_SF skip_one
+    self.skip_func(_F_skip_one)                   // CALL_SF skip_one
     self.Emit("TESTQ", _AX, _AX)                // TESTQ   AX, AX
     self.Sjmp("JS"   , _LB_parsing_error_v)     // JS      _parse_error_v
 }

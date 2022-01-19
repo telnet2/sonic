@@ -14,8 +14,8 @@ var (
     _subr__lspace      = __native_entry__() + 429
     _subr__lzero       = __native_entry__() + 13
     _subr__quote       = __native_entry__() + 5328
-    _subr__skip_array  = __native_entry__() + 19163
-    _subr__skip_object = __native_entry__() + 19198
+    _subr__skip_array  = __native_entry__() + 19164
+    _subr__skip_object = __native_entry__() + 19202
     _subr__skip_one    = __native_entry__() + 16306
     _subr__u64toa      = __native_entry__() + 4008
     _subr__unquote     = __native_entry__() + 7125

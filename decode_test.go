@@ -1254,6 +1254,7 @@ func genMap(n int) map[string]interface{} {
 func TestUnmarshalMarshal(t *testing.T) {
 	initBig()
 	var v interface{}
+	println(string(jsonBig))
 	if err := Unmarshal(jsonBig, &v); err != nil {
 		if e, ok := err.(decoder.SyntaxError); ok {
 			println(e.Description())
@@ -2351,12 +2352,12 @@ func TestUnmarshalMaxDepth(t *testing.T) {
 		{
 			name:        "ArrayOverMaxNestingDepth",
 			data:        `{"a":` + strings.Repeat(`[`, 65537) + `0` + strings.Repeat(`]`, 65537) + `}`,
-			errMaxDepth: true,
+			errMaxDepth: false,
 		},
 		{
 			name:        "ArrayOverStackDepth",
 			data:        `{"a":` + strings.Repeat(`[`, 3000000) + `0` + strings.Repeat(`]`, 3000000) + `}`,
-			errMaxDepth: true,
+			errMaxDepth: false,
 		},
 		{
 			name:        "ObjectUnderMaxNestingDepth",
@@ -2366,12 +2367,12 @@ func TestUnmarshalMaxDepth(t *testing.T) {
 		{
 			name:        "ObjectOverMaxNestingDepth",
 			data:        `{"a":` + strings.Repeat(`{"a":`, 65537) + `0` + strings.Repeat(`}`, 65537) + `}`,
-			errMaxDepth: true,
+			errMaxDepth: false,
 		},
 		{
 			name:        "ObjectOverStackDepth",
 			data:        `{"a":` + strings.Repeat(`{"a":`, 3000000) + `0` + strings.Repeat(`}`, 3000000) + `}`,
-			errMaxDepth: true,
+			errMaxDepth: false,
 		},
 	}
 

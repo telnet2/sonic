@@ -53,3 +53,7 @@ var MaxEncodeStackSize uint = 65536
 // MaxDecodeStackSize sets the max stack depth that decoder can reach, 
 // which must be larger than the max depth of decoded struct * 2
 var MaxDecodeStackSize uint = 65536
+
+// MaxDecodeJSONDepth sets the max stack depth that decoder can reach, 
+// which must be larger than the max depth of decoded struct * 2
+var MaxDecodeJSONDepth uint = 8
