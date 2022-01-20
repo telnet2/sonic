@@ -367,7 +367,9 @@ func (self *Node) SetAny(key string, val interface{}) (bool, error) {
 
 // Unset remove the node of given key under object parent, and reports if the key has existed.
 func (self *Node) Unset(key string) (bool, error) {
-    self.must(types.V_OBJECT, "an object")
+    if err := self.should(types.V_OBJECT, "an object"); err != nil {
+        return false, err
+    }
     p, i := self.skipKey(key)
     if !p.Exists() {
         return false, nil

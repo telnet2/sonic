@@ -17,8 +17,10 @@
 package ast
 
 import (
+    `sync`
     `unsafe`
 
+    `github.com/bytedance/sonic/internal/native/types`
     `github.com/bytedance/sonic/internal/rt`
 )
 
@@ -53,4 +55,25 @@ const _SPACE_CHAR_MASK = (1<<' ')|(1<<'\t')|(1<<'\r')|(1<<'\n')
 
 func isSpace(c byte) bool {
     return (int(1<<c) & _SPACE_CHAR_MASK) != 0
+}
+
+var stackPool = sync.Pool{
+    New: func()interface{}{
+        sm := types.NewStateMachine()
+        return &sm
+    },
+}
+
+func newStack() *types.StateMachine {
+    if ret := stackPool.Get(); ret == nil {
+        st := types.NewStateMachine()
+        return &st
+    } else {
+        return ret.(*types.StateMachine)
+    }
+}
+
+func freeStack(p *types.StateMachine) {
+    p.Reset()
+    stackPool.Put(p)
 }

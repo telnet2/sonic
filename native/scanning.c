@@ -705,21 +705,21 @@ void vunsigned(const GoString *src, long *p, JsonState *ret) {
 #define FSM_OBJ_0       6
 
 #define FSM_DROP(v)     (v)->sp--
-#define FSM_REPL(v, t)  (v)->vt[(v)->sp - 1] = (t)
+#define FSM_REPL(v, t)  (v)->vt.buf[(v)->sp - 1] = (t)
 
 #define FSM_CHAR(c)     do { if (ch != (c)) return -ERR_INVAL; } while (0)
 #define FSM_XERR(v)     do { long r = (v); if (r < 0) return r; } while (0)
 
 static inline void fsm_init(StateMachine *self, int vt) {
     self->sp = 1;
-    self->vt[0] = vt;
+    self->vt.buf[0] = vt;
 }
 
 static inline long fsm_push(StateMachine *self, int vt) {
-    if (self->sp >= MAX_RECURSE) {
+    if (self->sp >= self->vt.cap) {
         return -ERR_RECURSE_MAX;
     } else {
-        self->vt[self->sp++] = vt;
+        self->vt.buf[self->sp++] = vt;
         return 0;
     }
 }
@@ -732,7 +732,7 @@ static inline long fsm_exec(StateMachine *self, const GoString *src, long *p) {
     /* run until no more nested values */
     while (self->sp) {
         ch = advance_ns(src, p);
-        vt = self->vt[self->sp - 1];
+        vt = self->vt.buf[self->sp - 1];
 
         /* set the start address if any */
         if (vi == -1) {

@@ -45,7 +45,7 @@ import (
 const (
     _VD_args   = 8      // 8 bytes  for passing arguments to this functions
     _VD_fargs  = 64     // 64 bytes for passing arguments to other Go functions
-    _VD_saves  = 40     // 40 bytes for saving the registers before CALL instructions
+    _VD_saves  = 120     // 40 bytes for saving the registers before CALL instructions
     _VD_locals = 56     // 56 bytes for local variables
 )
 
@@ -148,6 +148,7 @@ var (
     _F_convTslice    = jit.Func(convTslice)
     _F_convTstring   = jit.Func(convTstring)
     _F_invalid_vtype = jit.Func(invalid_vtype)
+    _F_growstack     = jit.Func(moreFsm)
 )
 
 var (
@@ -170,6 +171,47 @@ var _R_tab = map[int]string {
     '}': "_decode_V_OBJECT_END",
 }
 
+var _REG_grow = []obj.Addr { _ST, _VP, _IP, _IL, _IC, _DI, _SI, _DX, _R8, _R9, _AX, _R11, _CX }
+
+func (self *_ValueDecoder) check_stack(i int, index obj.Addr) {
+    key := "_check_stack_end_" + strconv.Itoa(i)
+
+    self.Emit("MOVQ",index, jit.Ptr(_ST, _ST_Sp))
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vt + 16), _R11)
+    self.Emit("CMPQ", index, _R11)
+    self.Sjmp("JB"  , key)
+    self.Byte(0x4c, 0x8d, 0x1d)         // LEAQ ?(PC), R11
+    self.Sref(key, 4)                   // .... &ret
+    self.Sjmp("JMP" , "_more_stack")   // JMP  _more_space
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), index) 
+    self.Link(key)
+}
+
+func (self *_ValueDecoder) save_vt(vt obj.Addr, index obj.Addr) {
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vt), _R11)
+    self.Emit("MOVQ", vt, jit.Sib(_R11, index, 8, 0))
+}
+
+func (self *_ValueDecoder) load_vt(vt obj.Addr, index obj.Addr) {
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vt), _R11)
+    self.Emit("MOVQ", jit.Sib(_R11, index, 8, 0), vt)
+}
+
+func (self *_ValueDecoder) save_vp_not_ax(i int, vp obj.Addr, index obj.Addr, saveDI bool) {
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vp), _R11)
+    self.WriteRecNotAX(i, vp, jit.Sib(_R11, index, 8, 0), saveDI)
+}
+
+func (self *_ValueDecoder) save_vp_ax(i int, index obj.Addr, saveDI bool) {
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vp), _R11)
+    self.WritePtrAX(i, jit.Sib(_R11, index, 8, 0), saveDI)
+}
+
+func (self *_ValueDecoder) load_vp(vp obj.Addr, index obj.Addr) {
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vp), _R11)
+    self.Emit("MOVQ", jit.Sib(_R11, index, 8, 0), vp)
+}
+
 func (self *_ValueDecoder) compile() {
     self.Emit("SUBQ", jit.Imm(_VD_size), _SP)       // SUBQ $_VD_size, SP
     self.Emit("MOVQ", _BP, jit.Ptr(_SP, _VD_offs))  // MOVQ BP, _VD_offs(SP)
@@ -185,20 +227,21 @@ func (self *_ValueDecoder) compile() {
     /* add ST offset */
     self.Emit("ADDQ", jit.Imm(_FsmOffset), _ST)                 // ADDQ _FsmOffset, _ST
     self.Emit("MOVQ", _CX, jit.Ptr(_ST, _ST_Sp))                // MOVQ CX, ST.Sp
-    self.WriteRecNotAX(0, _VP, jit.Ptr(_ST, _ST_Vp), false)                // MOVQ VP, ST.Vp[0]
-    self.Emit("MOVQ", jit.Imm(_S_val), jit.Ptr(_ST, _ST_Vt))    // MOVQ _S_val, ST.Vt[0]
+    self.save_vp_not_ax(0, _VP, _CX, false)                     // MOVQ VP, ST.Vp[0]
+    self.save_vt(jit.Imm(_S_val), _CX)                          // MOVQ _S_val, ST.Vt[0]
     self.Sjmp("JMP" , "_next")                                  // JMP  _next
 
     /* set the value from previous round */
     self.Link("_set_value")                                 // _set_value:
     self.Emit("MOVL" , jit.Imm(_S_vmask), _DX)              // MOVL  _S_vmask, DX
     self.Emit("MOVQ" , jit.Ptr(_ST, _ST_Sp), _CX)           // MOVQ  ST.Sp, CX
-    self.Emit("MOVQ" , jit.Sib(_ST, _CX, 8, _ST_Vt), _AX)   // MOVQ  ST.Vt[CX], AX
+    self.load_vt(_AX, _CX)                                  // MOVQ  ST.Vt[CX], AX
     self.Emit("BTQ"  , _AX, _DX)                            // BTQ   AX, DX
     self.Sjmp("JNC"  , "_vtype_error")                      // JNC   _vtype_error
     self.Emit("XORL" , _SI, _SI)                            // XORL  SI, SI
     self.Emit("SUBQ" , jit.Imm(1), jit.Ptr(_ST, _ST_Sp))    // SUBQ  $1, ST.Sp
-    self.Emit("XCHGQ", jit.Sib(_ST, _CX, 8, _ST_Vp), _SI)   // XCHGQ ST.Vp[CX], SI
+    self.Emit("MOVQ" , jit.Ptr(_ST, _ST_Vp), _R11)
+    self.Emit("XCHGQ", jit.Sib(_R11, _CX, 8, 0), _SI)   // XCHGQ ST.Vp[CX], SI
     self.Emit("MOVQ" , _R8, jit.Ptr(_SI, 0))                // MOVQ  R8, (SI)
     self.WriteRecNotAX(1, _R9, jit.Ptr(_SI, 8), false)           // MOVQ  R9, 8(SI)
 
@@ -207,6 +250,7 @@ func (self *_ValueDecoder) compile() {
     self.Emit("MOVQ" , jit.Ptr(_ST, _ST_Sp), _AX)   // MOVQ  ST.Sp, AX
     self.Emit("TESTQ", _AX, _AX)                    // TESTQ AX, AX
     self.Sjmp("JS"   , "_return")                   // JS    _return
+    // self.debug_print_regs(0, _IC, _CX)
 
     /* fast path: test up to 4 characters manually */
     self.Emit("CMPQ"   , _IC, _IL)                      // CMPQ    IC, IL
@@ -303,7 +347,7 @@ func (self *_ValueDecoder) compile() {
     self.Link("_decode_V_ARRAY")                            // _decode_V_ARRAY
     self.Emit("MOVL", jit.Imm(_S_vmask), _DX)               // MOVL _S_vmask, DX
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)            // MOVQ ST.Sp, CX
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vt), _AX)    // MOVQ ST.Vt[CX], AX
+    self.load_vt(_AX, _CX)                                  // MOVQ ST.Vt[CX], AX
     self.Emit("BTQ" , _AX, _DX)                             // BTQ  AX, DX
     self.Sjmp("JNC" , "_invalid_char")                      // JNC  _invalid_char
 
@@ -324,34 +368,32 @@ func (self *_ValueDecoder) compile() {
 
     /* replace current state with an array */
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)                        // MOVQ ST.Sp, CX
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vp), _SI)                // MOVQ ST.Vp[CX], SI
-    self.Emit("MOVQ", jit.Imm(_S_arr), jit.Sib(_ST, _CX, 8, _ST_Vt))    // MOVQ _S_arr, ST.Vt[CX]
+    self.load_vp(_SI, _CX)                                              // MOVQ ST.Vp[CX], SI
+    self.save_vt(jit.Imm(_S_arr), _CX)                                  // MOVQ _S_arr, ST.Vt[CX]
     self.Emit("MOVQ", _T_slice, _AX)                                    // MOVQ _T_slice, AX
     self.Emit("MOVQ", _AX, jit.Ptr(_SI, 0))                             // MOVQ AX, (SI)
-    self.WriteRecNotAX(2, _R8, jit.Ptr(_SI, 8), false)                            // MOVQ R8, 8(SI)
+    self.WriteRecNotAX(2, _R8, jit.Ptr(_SI, 8), false)                  // MOVQ R8, 8(SI)
 
     /* add a new slot for the first element */
     self.Emit("ADDQ", jit.Imm(1), _CX)                                  // ADDQ $1, CX
-    self.Emit("CMPQ", _CX, jit.Imm(types.MAX_RECURSE))                  // CMPQ CX, ${types.MAX_RECURSE}
-    self.Sjmp("JAE"  , "_stack_overflow")                                // JA   _stack_overflow
+    self.check_stack(0, _CX)
     self.Emit("MOVQ", jit.Ptr(_R8, 0), _AX)                             // MOVQ (R8), AX
-    self.Emit("MOVQ", _CX, jit.Ptr(_ST, _ST_Sp))                        // MOVQ CX, ST.Sp
-    self.WritePtrAX(3, jit.Sib(_ST, _CX, 8, _ST_Vp), false)                // MOVQ AX, ST.Vp[CX]
-    self.Emit("MOVQ", jit.Imm(_S_arr_0), jit.Sib(_ST, _CX, 8, _ST_Vt))  // MOVQ _S_arr_0, ST.Vt[CX]
+    self.save_vp_ax(3, _CX, false)                                      // MOVQ AX, ST.Vp[CX]
+    self.save_vt(jit.Imm(_S_arr_0), _CX)                                // MOVQ _S_arr_0, ST.Vt[CX]
     self.Sjmp("JMP" , "_next")                                          // JMP  _next
 
     /** V_OBJECT **/
     self.Link("_decode_V_OBJECT")                                       // _decode_V_OBJECT:
     self.Emit("MOVL", jit.Imm(_S_vmask), _DX)                           // MOVL    _S_vmask, DX
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)                        // MOVQ    ST.Sp, CX
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vt), _AX)                // MOVQ    ST.Vt[CX], AX
+    self.load_vt(_AX, _CX)                                          // MOVQ    ST.Vt[CX], AX
     self.Emit("BTQ" , _AX, _DX)                                         // BTQ     AX, DX
     self.Sjmp("JNC" , "_invalid_char")                                  // JNC     _invalid_char
     self.call_go(_F_makemap_small)                                      // CALL_GO runtime.makemap_small
     self.Emit("MOVQ", jit.Ptr(_SP, 0), _AX)                             // MOVQ    (SP), AX
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)                        // MOVQ    ST.Sp, CX
-    self.Emit("MOVQ", jit.Imm(_S_obj), jit.Sib(_ST, _CX, 8, _ST_Vt))    // MOVQ    _S_obj, ST.Vt[CX]
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vp), _SI)                // MOVQ    ST.Vp[CX], SI
+    self.save_vt(jit.Imm(_S_obj), _CX)                                  // MOVQ    _S_obj, ST.Vt[CX]
+    self.load_vp(_SI, _CX)                                              // MOVQ    ST.Vp[CX], SI
     self.Emit("MOVQ", _T_map, _DX)                                      // MOVQ    _T_map, DX
     self.Emit("MOVQ", _DX, jit.Ptr(_SI, 0))                             // MOVQ    DX, (SI)
     self.WritePtrAX(4, jit.Ptr(_SI, 8), false)                             // MOVQ    AX, 8(SI)
@@ -374,7 +416,7 @@ func (self *_ValueDecoder) compile() {
     self.Link("_noescape")                                  // _noescape:
     self.Emit("MOVL", jit.Imm(_S_omask), _DI)               // MOVL _S_omask, DI
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)            // MOVQ ST.Sp, CX
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vt), _SI)    // MOVQ ST.Vt[CX], SI
+    self.load_vt(_SI, _CX)                                  // MOVQ ST.Vt[CX], SI
     self.Emit("BTQ" , _SI, _DI)                             // BTQ  SI, DI
     self.Sjmp("JC"  , "_object_key")                        // JC   _object_key
 
@@ -396,15 +438,13 @@ func (self *_ValueDecoder) compile() {
     /* the string is an object key, get the map */
     self.Link("_object_key")
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)            // MOVQ ST.Sp, CX
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vp), _SI)    // MOVQ ST.Vp[CX], SI
+    self.load_vp(_SI, _CX)                                  // MOVQ ST.Vp[CX], SI
     self.Emit("MOVQ", jit.Ptr(_SI, 8), _SI)                 // MOVQ 8(SI), SI
 
     /* add a new delimiter */
-    self.Emit("ADDQ", jit.Imm(1), _CX)                                      // ADDQ $1, CX
-    self.Emit("CMPQ", _CX, jit.Imm(types.MAX_RECURSE))                      // CMPQ CX, ${types.MAX_RECURSE}
-    self.Sjmp("JAE"  , "_stack_overflow")                                    // JA   _stack_overflow
-    self.Emit("MOVQ", _CX, jit.Ptr(_ST, _ST_Sp))                            // MOVQ CX, ST.Sp
-    self.Emit("MOVQ", jit.Imm(_S_obj_delim), jit.Sib(_ST, _CX, 8, _ST_Vt))  // MOVQ _S_obj_delim, ST.Vt[CX]
+    self.Emit("ADDQ", jit.Imm(1), _CX)                      // ADDQ $1, CX
+    self.check_stack(1, _CX)                                // JA   _stack_overflow
+    self.save_vt(jit.Imm(_S_obj_delim), _CX)                // MOVQ _S_obj_delim, ST.Vt[CX]
 
     /* add a new slot int the map */
     self.Emit("MOVQ", _T_map, _DX)                      // MOVQ    _T_map, DX
@@ -417,7 +457,7 @@ func (self *_ValueDecoder) compile() {
 
     /* add to the pointer stack */
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)                 // MOVQ ST.Sp, CX
-    self.WritePtrAX(6, jit.Sib(_ST, _CX, 8, _ST_Vp), false)    // MOVQ AX, ST.Vp[CX]
+    self.save_vp_ax(6, _CX, false)  
     self.Sjmp("JMP" , "_next")                                   // JMP  _next
 
     /* allocate memory to store the string header and unquoted result */
@@ -507,13 +547,12 @@ func (self *_ValueDecoder) compile() {
 
     /** V_KEY_SEP **/
     self.Link("_decode_V_KEY_SEP")                                          // _decode_V_KEY_SEP:
-    // self.Byte(0xcc)
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)                            // MOVQ ST.Sp, CX
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vt), _AX)                    // MOVQ ST.Vt[CX], AX
+    self.load_vt(_AX, _CX)                    // MOVQ ST.Vt[CX], AX
     self.Emit("CMPQ", _AX, jit.Imm(_S_obj_delim))                           // CMPQ AX, _S_obj_delim
     self.Sjmp("JNE" , "_invalid_char")                                      // JNE  _invalid_char
-    self.Emit("MOVQ", jit.Imm(_S_val), jit.Sib(_ST, _CX, 8, _ST_Vt))        // MOVQ _S_val, ST.Vt[CX]
-    self.Emit("MOVQ", jit.Imm(_S_obj), jit.Sib(_ST, _CX, 8, _ST_Vt - 8))    // MOVQ _S_obj, ST.Vt[CX - 1]
+    self.save_vt(jit.Imm(_S_val), _CX)                                      // MOVQ _S_val, ST.Vt[CX]
+    self.Emit("MOVQ", jit.Imm(_S_obj), jit.Sib(_R11, _CX, 8, -8))           // MOVQ _S_obj, ST.Vt[CX - 1]
     self.Sjmp("JMP" , "_next")                                              // JMP  _next
 
     /** V_ELEM_SEP **/
@@ -521,13 +560,14 @@ func (self *_ValueDecoder) compile() {
     self.Emit("MOVQ"    , jit.Imm(_S_obj), _AX)                 // MOVQ     _S_obj, AX
     self.Emit("MOVQ"    , jit.Imm(_S_obj_x), _DX)               // MOVQ     _S_obj_x, DX
     self.Emit("MOVQ"    , jit.Ptr(_ST, _ST_Sp), _CX)            // MOVQ     ST.Sp, CX
-    self.Emit("CMPXCHGQ", _DX, jit.Sib(_ST, _CX, 8, _ST_Vt))    // CMPXCHGQ DX, ST.Vt[CX]
+    self.Emit("MOVQ"    , jit.Ptr(_ST, _ST_Vt), _R11)           
+    self.Emit("CMPXCHGQ", _DX, jit.Sib(_R11, _CX, 8, 0))        // CMPXCHGQ DX, ST.Vt[CX]
     self.Sjmp("JZ"      , "_next")                              // JZ       _next
     self.Emit("CMPQ"    , _AX, jit.Imm(_S_arr))                 // CMPQ     _AX, _S_arr
     self.Sjmp("JNE"     , "_invalid_char")                      // JNE      _invalid_char
 
     /* arrays */
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vp), _SI)    // MOVQ ST.Vp[CX], SI
+    self.load_vp(_SI, _CX)                                  // MOVQ ST.Vp[CX], SI
     self.Emit("MOVQ", jit.Ptr(_SI, 8), _SI)                 // MOVQ 8(SI), SI
     self.Emit("MOVQ", jit.Ptr(_SI, 8), _DX)                 // MOVQ 8(SI), DX
     self.Emit("CMPQ", _DX, jit.Ptr(_SI, 16))                // CMPQ DX, 16(SI)
@@ -538,54 +578,57 @@ func (self *_ValueDecoder) compile() {
     self.Emit("ADDQ", jit.Imm(1), jit.Ptr(_SI, 8))                      // ADDQ $1, 8(SI)
     self.Emit("MOVQ", jit.Ptr(_SI, 0), _SI)                             // MOVQ (SI), SI
     self.Emit("ADDQ", jit.Imm(1), _CX)                                  // ADDQ $1, CX
-    self.Emit("CMPQ", _CX, jit.Imm(types.MAX_RECURSE))                  // CMPQ CX, ${types.MAX_RECURSE}
-    self.Sjmp("JAE"  , "_stack_overflow") 
+    self.check_stack(2, _CX) 
     self.Emit("SHLQ", jit.Imm(1), _DX)                                  // SHLQ $1, DX
     self.Emit("LEAQ", jit.Sib(_SI, _DX, 8, 0), _SI)                     // LEAQ (SI)(DX*8), SI
-    self.Emit("MOVQ", _CX, jit.Ptr(_ST, _ST_Sp))                        // MOVQ CX, ST.Sp
-    self.WriteRecNotAX(7 , _SI, jit.Sib(_ST, _CX, 8, _ST_Vp), false)           // MOVQ SI, ST.Vp[CX]
-    self.Emit("MOVQ", jit.Imm(_S_val), jit.Sib(_ST, _CX, 8, _ST_Vt))    // MOVQ _S_val, ST.Vt[CX}
+    self.save_vp_not_ax(7, _SI, _CX, false)
+    self.save_vt(jit.Imm(_S_val), _CX)                                  // MOVQ _S_val, ST.Vt[CX}
     self.Sjmp("JMP" , "_next")                                          // JMP  _next
 
     /** V_ARRAY_END **/
     self.Link("_decode_V_ARRAY_END")                        // _decode_V_ARRAY_END:
     self.Emit("XORL", _DX, _DX)                             // XORL DX, DX
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)            // MOVQ ST.Sp, CX
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vt), _AX)    // MOVQ ST.Vt[CX], AX
+    self.load_vt(_AX, _CX)                                  // MOVQ ST.Vt[CX], AX
+    // self.debug_print_regs(1, _AX, _CX)
     self.Emit("CMPQ", _AX, jit.Imm(_S_arr_0))               // CMPQ AX, _S_arr_0
     self.Sjmp("JE"  , "_first_item")                        // JE   _first_item
     self.Emit("CMPQ", _AX, jit.Imm(_S_arr))                 // CMPQ AX, _S_arr
     self.Sjmp("JNE" , "_invalid_char")                      // JNE  _invalid_char
     self.Emit("SUBQ", jit.Imm(1), jit.Ptr(_ST, _ST_Sp))     // SUBQ $1, ST.Sp
-    self.Emit("MOVQ", _DX, jit.Sib(_ST, _CX, 8, _ST_Vp))    // MOVQ DX, ST.Vp[CX]
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vt), _R11)
+    self.Emit("MOVQ", _DX, jit.Sib(_R11, _CX, 8, 0))
     self.Sjmp("JMP" , "_next")                              // JMP  _next
 
     /* first element of an array */
     self.Link("_first_item")                                    // _first_item:
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)                // MOVQ ST.Sp, CX
     self.Emit("SUBQ", jit.Imm(2), jit.Ptr(_ST, _ST_Sp))         // SUBQ $2, ST.Sp
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vp - 8), _SI)    // MOVQ ST.Vp[CX - 1], SI
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vp), _R11)
+    self.Emit("MOVQ", jit.Sib(_R11, _CX, 8, - 8), _SI)          // MOVQ ST.Vp[CX - 1], SI
     self.Emit("MOVQ", jit.Ptr(_SI, 8), _SI)                     // MOVQ 8(SI), SI
-    self.Emit("MOVQ", _DX, jit.Sib(_ST, _CX, 8, _ST_Vp - 8))    // MOVQ DX, ST.Vp[CX - 1]
-    self.Emit("MOVQ", _DX, jit.Sib(_ST, _CX, 8, _ST_Vp))        // MOVQ DX, ST.Vp[CX]
+    self.Emit("MOVQ", _DX, jit.Sib(_R11, _CX, 8, - 8))          // MOVQ DX, ST.Vp[CX - 1]
+    self.Emit("MOVQ", _DX, jit.Sib(_R11, _CX, 8, 0))            // MOVQ DX, ST.Vp[CX]
     self.Emit("MOVQ", _DX, jit.Ptr(_SI, 8))                     // MOVQ DX, 8(SI)
     self.Sjmp("JMP" , "_next")                                  // JMP  _next
 
     /** V_OBJECT_END **/
     self.Link("_decode_V_OBJECT_END")                       // _decode_V_OBJECT_END:
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)            // MOVQ ST.Sp, CX
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vt), _AX)    // MOVQ ST.Vt[CX], AX
+    self.load_vt(_AX, _CX)                                  // MOVQ ST.Vt[CX], AX
     self.Emit("CMPQ", _AX, jit.Imm(_S_obj))                 // CMPQ AX, _S_obj
     self.Sjmp("JNE" , "_invalid_char")                      // JNE  _invalid_char
     self.Emit("XORL", _AX, _AX)                             // XORL AX, AX
     self.Emit("SUBQ", jit.Imm(1), jit.Ptr(_ST, _ST_Sp))     // SUBQ $1, ST.Sp
-    self.Emit("MOVQ", _AX, jit.Sib(_ST, _CX, 8, _ST_Vp))    // MOVQ AX, ST.Vp[CX]
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vp), _R11)
+    self.Emit("MOVQ", _AX, jit.Sib(_R11, _CX, 8, 0))
     self.Sjmp("JMP" , "_next")                              // JMP  _next
 
     /* return from decoder */
     self.Link("_return")                            // _return:
+    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vp), _R11)
+    self.Emit("MOVQ", jit.Imm(0), jit.Ptr(_R11, 0))
     self.Emit("XORL", _EP, _EP)                     // XORL EP, EP
-    self.Emit("MOVQ", _EP, jit.Ptr(_ST, _ST_Vp))    // MOVQ EP, ST.Vp[0]
     self.Link("_epilogue")                          // _epilogue:
     self.Emit("SUBQ", jit.Imm(_FsmOffset), _ST)     // SUBQ _FsmOffset, _ST
     self.Emit("MOVQ", jit.Ptr(_SP, _VD_offs), _BP)  // MOVQ _VD_offs(SP), BP
@@ -609,7 +652,7 @@ func (self *_ValueDecoder) compile() {
 
     /* update the slice */
     self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), _CX)            // MOVQ ST.Sp, CX
-    self.Emit("MOVQ", jit.Sib(_ST, _CX, 8, _ST_Vp), _SI)    // MOVQ ST.Vp[CX], SI
+    self.load_vp(_SI, _CX)                                  // MOVQ ST.Vp[CX], SI
     self.Emit("MOVQ", jit.Ptr(_SI, 8), _SI)                 // MOVQ 8(SI), SI
     self.Emit("MOVQ", _DX, jit.Ptr(_SI, 8))                 // MOVQ DX, 8(SI)
     self.Emit("MOVQ", _AX, jit.Ptr(_SI, 16))                // MOVQ AX, 16(AX)
@@ -617,9 +660,6 @@ func (self *_ValueDecoder) compile() {
     self.Sjmp("JMP" , "_array_append")                      // JMP  _array_append
 
     /* error handlers */
-    self.Link("_stack_overflow")
-    self.Emit("MOVL" , _E_recurse, _EP)         // MOVQ  _E_recurse, EP
-    self.Sjmp("JMP"  , "_error")                // JMP   _error
     self.Link("_vtype_error")                   // _vtype_error:
     self.Emit("MOVQ" , _DI, _IC)                // MOVQ  DI, IC
     self.Emit("MOVL" , _E_invalid, _EP)         // MOVL  _E_invalid, EP
@@ -644,6 +684,14 @@ func (self *_ValueDecoder) compile() {
     self.Emit("MOVQ", _AX, jit.Ptr(_SP, 0))     // MOVQ AX, (SP)
     self.call(_F_invalid_vtype)                 // CALL invalid_type
     self.Emit("UD2")                            // UD2
+
+    self.Link("_more_stack")
+    self.save(_REG_debug...)
+    self.Emit("LEAQ", jit.Ptr(_ST, -_FsmOffset), _AX)
+    self.Emit("MOVQ" , _AX, jit.Ptr(_SP, 0))
+    self.call(_F_growstack)    
+    self.load(_REG_debug...)   
+    self.Rjmp("JMP" , _R11)       
 
     /* switch jump table */
     self.Link("_switch_table")              // _switch_table:
@@ -718,7 +766,6 @@ func (self *_ValueDecoder) WriteRecNotAX(i int, ptr obj.Addr, rec obj.Addr, save
 }
 
 /** Generic Decoder **/
-
 var (
     _subr_decode_value = new(_ValueDecoder).build()
 )

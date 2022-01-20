@@ -18,6 +18,7 @@ package decoder
 
 import (
     `errors`
+    `reflect`
     `sync`
     `unsafe`
 
@@ -28,21 +29,23 @@ import (
 )
 
 const (
-    _MinSlice = 16
-    _MaxDigitNums = 800  // used in atof fallback algorithm
+    _MinSlice      = 16
+    _MaxDigitNums  = 800  // used in atof fallback algorithm
+    _ThresholdGrow = 65536
 )
 
 const (
     _PtrBytes   = _PTR_SIZE / 8
+    _IntBytes   = int64(unsafe.Sizeof(int(0)))
     _FsmOffset  = _PtrBytes + int64(unsafe.Sizeof([]unsafe.Pointer{}))
-    _DbufOffset = _FsmOffset + int64(unsafe.Sizeof(types.StateMachine{})) + types.MAX_RECURSE * _PtrBytes
+    _DbufOffset = _FsmOffset + int64(unsafe.Sizeof(types.StateMachine{})) + int64(unsafe.Sizeof([]unsafe.Pointer{}))
     _StackSize  = unsafe.Sizeof(_Stack{})
 )
 
 const (
     _ST_Sp = 0
     _ST_Vt = _PtrBytes
-    _ST_Vp = _PtrBytes * (types.MAX_RECURSE + 1)
+    _ST_Vp = int64(unsafe.Sizeof(types.StateMachine{}))
 )
 
 var (
@@ -51,13 +54,16 @@ var (
     fieldCache    = []*caching.FieldMap(nil)
     fieldCacheMux = sync.Mutex{}
     programCache  = caching.CreateProgramCache()
+
+    typeVp        = rt.UnpackType(reflect.TypeOf(unsafe.Pointer(nil)))
+    typeVt        = rt.UnpackType(reflect.TypeOf(int(0)))
 )
 
 type _Stack struct {
     sp uintptr
     sb []unsafe.Pointer
     mm types.StateMachine
-    vp [types.MAX_RECURSE]unsafe.Pointer
+    vp []unsafe.Pointer
     dp [_MaxDigitNums]byte
 }
 
@@ -122,7 +128,9 @@ func _Decoder_Generic_Shadow(sb *_Stack) {
 func newStack() *_Stack {
     if ret := stackPool.Get(); ret == nil {
         st := new(_Stack)
-        st.sb = make([]unsafe.Pointer, 0, option.MaxDecodeStackSize)
+        st.sb = make([]unsafe.Pointer, option.MaxDecodeStackSize)
+        st.mm = types.NewStateMachine()
+        st.vp = make([]unsafe.Pointer, option.MaxDecodeJSONDepth)
         return st
     } else {
         return ret.(*_Stack)
@@ -131,10 +139,54 @@ func newStack() *_Stack {
 
 func resetStack(p *_Stack) {
     memclrNoHeapPointers(*(*unsafe.Pointer)(unsafe.Pointer(&p.sb)), uintptr(option.MaxDecodeStackSize)*_PtrBytes)
+    memclrNoHeapPointers(*(*unsafe.Pointer)(unsafe.Pointer(&p.vp)), uintptr(option.MaxDecodeJSONDepth)*_PtrBytes)
 }
+
+func moreFsm(st *_Stack) {
+    // fmt.Printf("sp(%d), %v\n", st.mm.Sp, st.mm.Vt[:st.mm.Sp])
+    exp := cap(st.vp) * 2
+    if exp > _ThresholdGrow {
+        exp -= exp / 4
+    }
+    if exp == 0 {
+        exp = int(option.MaxDecodeJSONDepth)
+    }
+
+    op := (*rt.GoSlice)(unsafe.Pointer(&st.vp))
+    op.Len = st.mm.Sp
+    np := growslice(typeVp, *op, exp)
+    *op = np
+
+    op = (*rt.GoSlice)(unsafe.Pointer(&st.mm.Vt))
+    op.Len = st.mm.Sp
+    np = growslice(typeVt, *op, exp)
+    *op = np
+
+    // fmt.Printf("sp(%d), %v\n", st.mm.Sp, st.mm.Vt[:st.mm.Sp])
+}
+
+func moreStack(st *_Stack) {
+    // fmt.Printf("sp(%d), %v\n", st.sp/8, st.sb[:st.sp/8])
+    exp := cap(st.sb) * 2
+    if exp > _ThresholdGrow {
+        exp -= exp / 4
+    }
+    if exp == 0 {
+        exp = int(option.MaxDecodeStackSize)
+    }
+
+    op := (*rt.GoSlice)(unsafe.Pointer(&st.sb))
+    op.Len = int(st.sp/_PtrBytes)
+    np := growslice(typeVp, *op, exp)
+    *op = np
+
+    // fmt.Printf("sp(%d), %v\n", cap(st.sb), st.sb[:st.sp/8])
+}
+
 
 func freeStack(p *_Stack) {
     p.sp = 0
+    p.mm.Reset()
     stackPool.Put(p)
 }
 

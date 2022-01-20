@@ -17,18 +17,21 @@
 package decoder
 
 import (
+    `fmt`
     `os`
     `runtime`
     `runtime/debug`
     `strings`
+    `unsafe`
 
     `github.com/bytedance/sonic/internal/jit`
+    `github.com/twitchyliquid64/golang-asm/obj`
 )
-
 
 var (
     debugSyncGC  = os.Getenv("SONIC_SYNC_GC") != ""
     debugAsyncGC = os.Getenv("SONIC_NO_ASYNC_GC") == ""
+    debugInstr   = os.Getenv("SONIC_DEBUG_INSTR") != ""
 )
 
 var (
@@ -38,19 +41,38 @@ var (
     _F_force_gc = jit.Func(debug.FreeOSMemory)
     _F_println  = jit.Func(println_wrapper)
     _F_print    = jit.Func(print)
+    _F_print_regs    = jit.Func(print_regs)
 )
+
+var _REG_debug = []obj.Addr { _ST, _VP, _IP, _IL, _IC, _DF, _ET, _EP, _AX, _CX, _DX, _DI, _SI, _R8, _R9}
 
 func println_wrapper(i int, op1 int, op2 int){
     println(i, " Intrs ", op1, _OpNames[op1], "next: ", op2, _OpNames[op2])
 }
 
-func print(i int){
-    println(i)
+func print(str *string){
+    println(*str)
+}
+
+func print_regs(i int, reg1 uint64, reg2 uint64) {
+    fmt.Printf("[%d] %d, %d\n", i, reg1, reg2)
+}
+
+func (self *_ValueDecoder) dcall(fn obj.Addr) {
+    self.Emit("MOVQ", fn, _IL)  // MOVQ ${fn}, AX
+    self.Rjmp("CALL", _IL)      // CALL AX
+}
+
+func (self *_Assembler) dcall(fn obj.Addr) {
+    self.Emit("MOVQ", fn, _IL)  // MOVQ ${fn}, AX
+    self.Rjmp("CALL", _IL)      // CALL AX
 }
 
 func (self *_Assembler) force_gc() {
-    self.call_go(_F_gc)
-    self.call_go(_F_force_gc)
+    self.save(_REG_debug...)
+    self.dcall(_F_gc)
+    self.dcall(_F_force_gc)
+    self.load(_REG_debug...)
 }
 
 func (self *_Assembler) debug_instr(i int, v *_Instr) {
@@ -67,4 +89,30 @@ func (self *_Assembler) debug_instr(i int, v *_Instr) {
         }
         self.force_gc()
     }
+}
+
+func (self *_ValueDecoder) debug_print(str *string) {
+    self.save(_REG_debug...)
+    self.Emit("MOVQ", jit.Imm(int64(uintptr(unsafe.Pointer(str)))), _IL)
+    self.Emit("MOVQ", _IL, jit.Ptr(_SP, 0))
+    self.dcall(_F_print)
+    self.load(_REG_debug...)
+}
+
+func (self *_ValueDecoder) debug_print_regs(i int, reg1 obj.Addr, reg2 obj.Addr) {
+    self.save(_REG_debug...)
+    self.Emit("MOVQ", jit.Imm(int64(i)), jit.Ptr(_SP, 0))
+    self.Emit("MOVQ", reg1, jit.Ptr(_SP, 8))
+    self.Emit("MOVQ", reg2, jit.Ptr(_SP, 16))
+    self.dcall(_F_print_regs)
+    self.load(_REG_debug...)
+}
+
+func (self *_Assembler) debug_print_regs(i int, reg1 obj.Addr, reg2 obj.Addr) {
+    self.save(_REG_debug...)
+    self.Emit("MOVQ", jit.Imm(int64(i)), jit.Ptr(_SP, 0))
+    self.Emit("MOVQ", reg1, jit.Ptr(_SP, 8))
+    self.Emit("MOVQ", reg2, jit.Ptr(_SP, 16))
+    self.dcall(_F_print_regs)
+    self.load(_REG_debug...)
 }

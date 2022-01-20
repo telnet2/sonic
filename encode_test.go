@@ -27,18 +27,16 @@ import (
 	`reflect`
 	`regexp`
 	`runtime`
-    `runtime/debug`
+	`runtime/debug`
+	`time`
 	`strconv`
 	`testing`
-	`time`
 	`unsafe`
 
 	`github.com/bytedance/sonic/encoder`
 )
 
-var (
-    debugAsyncGC = os.Getenv("SONIC_NO_ASYNC_GC") == ""
-)
+var debugAsyncGC = os.Getenv("SONIC_NO_ASYNC_GC") == ""
 func TestMain(m *testing.M) {
     go func ()  {
         if !debugAsyncGC {

@@ -18,7 +18,6 @@ package ast
 
 import (
     `fmt`
-    `sync`
     `unsafe`
 
     `github.com/bytedance/sonic/decoder`
@@ -45,12 +44,6 @@ type Parser struct {
     s           string
     noLazy      bool
     skipValue   bool
-}
-
-var stackPool = sync.Pool{
-    New: func()interface{}{
-        return &types.StateMachine{}
-    },
 }
 
 /** Parser Private Methods **/
@@ -325,10 +318,19 @@ func (self *Parser) Parse() (Node, types.ParsingError) {
 }
 
 func (self *Parser) skip() (int, types.ParsingError) {
-    fsm := stackPool.Get().(*types.StateMachine)
-    start := native.SkipOne(&self.s, &self.p, fsm)
-    stackPool.Put(fsm)
-    
+    p := self.p
+    fsm := newStack()
+loop:
+    start := native.SkipOne(&self.s, &p, fsm)
+    if start == -int(types.ERR_RECURSE_EXCEED_MAX) {
+        fsm.Grow()
+        p = self.p
+        goto loop
+    }
+
+    self.p = p
+    freeStack(fsm)
+
     if start < 0 {
         return self.p, types.ParsingError(-start)
     }

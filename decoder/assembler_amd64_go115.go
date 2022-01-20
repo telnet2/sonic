@@ -124,6 +124,8 @@
      _SP = jit.Reg("SP")
      _R8 = jit.Reg("R8")
      _R9 = jit.Reg("R9")
+     _R10 = jit.Reg("R10")
+     _R11 = jit.Reg("R11")
      _X0 = jit.Reg("X0")
      _X1 = jit.Reg("X1")
  )
@@ -1594,8 +1596,10 @@
  }
 
  func (self *_Assembler) print_gc(i int, p1 *_Instr, p2 *_Instr) {
+    self.save(_REG_debug...)
     self.Emit("MOVQ", jit.Imm(int64(p2.op())),  jit.Ptr(_SP, 16))// MOVQ $(p2.op()), 16(SP)
     self.Emit("MOVQ", jit.Imm(int64(p1.op())),  jit.Ptr(_SP, 8)) // MOVQ $(p1.op()), 8(SP)
     self.Emit("MOVQ", jit.Imm(int64(i)),  jit.Ptr(_SP, 0))       // MOVQ $(i), (SP)
-    self.call_go(_F_println)
+    self.dcall(_F_println)
+    self.load(_REG_debug...)
 }
