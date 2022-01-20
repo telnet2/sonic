@@ -2351,13 +2351,13 @@ func TestUnmarshalMaxDepth(t *testing.T) {
 		},
 		{
 			name:        "ArrayOverMaxNestingDepth",
-			data:        `{"a":` + strings.Repeat(`[`, 65537) + `0` + strings.Repeat(`]`, 65537) + `}`,
-			errMaxDepth: false,
+			data:        `{"a":` + strings.Repeat(`[`, 65538) + `0` + strings.Repeat(`]`, 65538) + `}`,
+			errMaxDepth: true,
 		},
 		{
 			name:        "ArrayOverStackDepth",
 			data:        `{"a":` + strings.Repeat(`[`, 3000000) + `0` + strings.Repeat(`]`, 3000000) + `}`,
-			errMaxDepth: false,
+			errMaxDepth: true,
 		},
 		{
 			name:        "ObjectUnderMaxNestingDepth",
@@ -2367,12 +2367,12 @@ func TestUnmarshalMaxDepth(t *testing.T) {
 		{
 			name:        "ObjectOverMaxNestingDepth",
 			data:        `{"a":` + strings.Repeat(`{"a":`, 65537) + `0` + strings.Repeat(`}`, 65537) + `}`,
-			errMaxDepth: false,
+			errMaxDepth: true,
 		},
 		{
 			name:        "ObjectOverStackDepth",
 			data:        `{"a":` + strings.Repeat(`{"a":`, 3000000) + `0` + strings.Repeat(`}`, 3000000) + `}`,
-			errMaxDepth: false,
+			errMaxDepth: true,
 		},
 	}
 

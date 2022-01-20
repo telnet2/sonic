@@ -19,16 +19,17 @@
 package decoder
 
 import (
-    `encoding/json`
-    `fmt`
-    `reflect`
-    `strconv`
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strconv"
 
-    `github.com/bytedance/sonic/internal/jit`
-    `github.com/bytedance/sonic/internal/native`
-    `github.com/bytedance/sonic/internal/native/types`
-    `github.com/twitchyliquid64/golang-asm/obj`
-    `github.com/twitchyliquid64/golang-asm/obj/x86`
+	"github.com/bytedance/sonic/internal/jit"
+	"github.com/bytedance/sonic/internal/native"
+	"github.com/bytedance/sonic/internal/native/types"
+	"github.com/bytedance/sonic/option"
+	"github.com/twitchyliquid64/golang-asm/obj"
+	"github.com/twitchyliquid64/golang-asm/obj/x86"
 )
 
 /** Crucial Registers:
@@ -174,17 +175,9 @@ var _R_tab = map[int]string {
 var _REG_grow = []obj.Addr { _ST, _VP, _IP, _IL, _IC, _DI, _SI, _DX, _R8, _R9, _AX }
 
 func (self *_ValueDecoder) check_stack(i int, index obj.Addr) {
-   self.Emit("MOVQ",index, jit.Ptr(_ST, _ST_Sp))
-   self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vt + 16), _R11)
-   self.Emit("CMPQ", index, _R11)
-   self.Sjmp("JB"  , "_check_stack_end_" + strconv.Itoa(i))
-   self.Emit("LEAQ", jit.Ptr(_ST, -_FsmOffset), _R11)
-   self.Emit("MOVQ" , _R11, jit.Ptr(_SP, 0))
-   self.save(_REG_debug...)
-   self.call(_F_growstack)    
-   self.load(_REG_debug...)         
-   self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), index)  
-   self.Link("_check_stack_end_" + strconv.Itoa(i))
+    self.Emit("MOVQ", index, jit.Ptr(_ST, _ST_Sp))
+    self.Emit("CMPQ", index, jit.Imm(int64(option.MaxDecodeJSONDepth)))
+    self.Sjmp("JAE" , "_stack_overflow")
 }
 
 func (self *_ValueDecoder) save_vt(vt obj.Addr, index obj.Addr) {
@@ -660,6 +653,9 @@ func (self *_ValueDecoder) compile() {
     self.Sjmp("JMP" , "_array_append")                      // JMP  _array_append
 
     /* error handlers */
+    self.Link("_stack_overflow")
+    self.Emit("MOVL" , _E_recurse, _EP)         // MOVQ  _E_recurse, EP
+    self.Sjmp("JMP"  , "_error")                // JMP   _error
     self.Link("_vtype_error")                   // _vtype_error:
     self.Emit("MOVQ" , _DI, _IC)                // MOVQ  DI, IC
     self.Emit("MOVL" , _E_invalid, _EP)         // MOVL  _E_invalid, EP
