@@ -19,16 +19,17 @@
 package decoder
 
 import (
-    `encoding/json`
-    `fmt`
-    `reflect`
-    `strconv`
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strconv"
 
-    `github.com/bytedance/sonic/internal/jit`
-    `github.com/bytedance/sonic/internal/native`
-    `github.com/bytedance/sonic/internal/native/types`
-    `github.com/twitchyliquid64/golang-asm/obj`
-    `github.com/twitchyliquid64/golang-asm/obj/x86`
+	"github.com/bytedance/sonic/internal/jit"
+	"github.com/bytedance/sonic/internal/native"
+	"github.com/bytedance/sonic/internal/native/types"
+	"github.com/bytedance/sonic/option"
+	"github.com/twitchyliquid64/golang-asm/obj"
+	"github.com/twitchyliquid64/golang-asm/obj/x86"
 )
 
 /** Crucial Registers:
@@ -174,17 +175,17 @@ var _R_tab = map[int]string {
 var _REG_grow = []obj.Addr { _ST, _VP, _IP, _IL, _IC, _DI, _SI, _DX, _R8, _R9, _AX, _R11, _CX }
 
 func (self *_ValueDecoder) check_stack(i int, index obj.Addr) {
-    key := "_check_stack_end_" + strconv.Itoa(i)
+    // key := "_check_stack_end_" + strconv.Itoa(i)
 
     self.Emit("MOVQ",index, jit.Ptr(_ST, _ST_Sp))
-    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vt + 16), _R11)
-    self.Emit("CMPQ", index, _R11)
-    self.Sjmp("JB"  , key)
-    self.Byte(0x4c, 0x8d, 0x1d)         // LEAQ ?(PC), R11
-    self.Sref(key, 4)                   // .... &ret
-    self.Sjmp("JMP" , "_more_stack")   // JMP  _more_space
-    self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), index) 
-    self.Link(key)
+    // self.Emit("MOVQ", jit.Ptr(_ST, _ST_Vt + 16), _R11)
+    self.Emit("CMPQ", index, jit.Imm(int64(option.MaxDecodeJSONDepth*_PtrBytes)))
+    self.Sjmp("JAE"  , "_more_stack")
+    // self.Byte(0x4c, 0x8d, 0x1d)         // LEAQ ?(PC), R11
+    // self.Sref(key, 4)                   // .... &ret
+    // self.Sjmp("JMP" , "_more_stack")   // JMP  _more_space
+    // self.Emit("MOVQ", jit.Ptr(_ST, _ST_Sp), index) 
+    // self.Link(key)
 }
 
 func (self *_ValueDecoder) save_vt(vt obj.Addr, index obj.Addr) {

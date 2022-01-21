@@ -95,8 +95,8 @@ endef
 all: ${ARCH}
 
 clean:
-	rm -vfr ${TMP_DIR}/{sse,avx,avx2}
-	rm -vfr ${OUT_DIR}/{sse,avx,avx2}
+	# rm -vfr ${TMP_DIR}/{sse,avx,avx2}
+	# rm -vfr ${OUT_DIR}/{sse,avx,avx2}
 
 $(foreach 								\
 	arch,								\

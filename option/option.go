@@ -16,6 +16,11 @@
 
 package option
 
+import (
+	"os"
+	"strconv"
+)
+
 // CompileOptions includes all options for encoder or decoder compiler.
 type CompileOptions struct {
     // the depth for recursive compile
@@ -44,16 +49,64 @@ func WithCompileRecursiveDepth(depth int) CompileOption {
 }
 
 // DefaultEncodeBufferSize sets the initial output buffer size for encoder
-var DefaultEncodeBufferSize uint = 4096
+var DefaultEncodeBufferSize uint = 1024*1024*2
 
-// MaxEncodeStackSize sets the max stack depth that encoder can reach, 
-// which must be larger than the max depth of encoded struct * 2
+// MaxEncodeStackSize sets the initial stack depth that encoder can reach
 var MaxEncodeStackSize uint = 65536
 
-// MaxDecodeStackSize sets the max stack depth that decoder can reach, 
-// which must be larger than the max depth of decoded struct * 2
-var MaxDecodeStackSize uint = 512
+// MaxDecodeStackSize sets the initial stack depth that decoder can reach
+var MaxDecodeStackSize uint = 65536
 
-// MaxDecodeJSONDepth sets the max stack depth that decoder can reach, 
-// which must be larger than the max depth of decoded struct * 2
-var MaxDecodeJSONDepth uint = 512
+// MaxDecodeJSONDepth sets the initial depth that decoded JSON can reach,
+var MaxDecodeJSONDepth uint = 65536
+
+func init() {
+    GetEnvDefaultEncodeBufferSize()
+    GetEnvMaxEncodeStackSize()
+    GetEnvMaxDecodeStackSize()
+    GetEnvMaxDecodeJSONDepth()
+}
+
+func GetEnvDefaultEncodeBufferSize() {
+    env := os.Getenv("SONIC_OPTION_DefaultEncodeBufferSize")
+    if env != "" {
+        i, err := strconv.Atoi(env)
+        if err != nil {
+            panic(err)
+        }
+        DefaultEncodeBufferSize = uint(i)
+    }
+}
+
+func GetEnvMaxEncodeStackSize() {
+    env := os.Getenv("SONIC_OPTION_MaxEncodeStackSize")
+    if env != "" {
+        i, err := strconv.Atoi(env)
+        if err != nil {
+            panic(err)
+        }
+        MaxEncodeStackSize = uint(i)
+    }
+}
+
+func GetEnvMaxDecodeStackSize() {
+    env := os.Getenv("SONIC_OPTION_MaxDecodeStackSize")
+    if env != "" {
+        i, err := strconv.Atoi(env)
+        if err != nil {
+            panic(err)
+        }
+        MaxDecodeStackSize = uint(i)
+    }
+}
+
+func GetEnvMaxDecodeJSONDepth() {
+    env := os.Getenv("SONIC_OPTION_MaxDecodeJSONDepth")
+    if env != "" {
+        i, err := strconv.Atoi(env)
+        if err != nil {
+            panic(err)
+        }
+        MaxDecodeJSONDepth = uint(i)
+    }
+}

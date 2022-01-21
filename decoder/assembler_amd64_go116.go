@@ -19,21 +19,22 @@
 package decoder
 
 import (
-    `encoding/json`
-    `fmt`
-    `math`
-    `reflect`
-    `strconv`
-    `unsafe`
-    
-    `github.com/bytedance/sonic/internal/caching`
-    `github.com/bytedance/sonic/internal/cpu`
-    `github.com/bytedance/sonic/internal/jit`
-    `github.com/bytedance/sonic/internal/native`
-    `github.com/bytedance/sonic/internal/native/types`
-    `github.com/bytedance/sonic/internal/rt`
-    `github.com/twitchyliquid64/golang-asm/obj`
-    `github.com/twitchyliquid64/golang-asm/obj/x86`
+	"encoding/json"
+	"fmt"
+	"math"
+	"reflect"
+	"strconv"
+	"unsafe"
+
+	"github.com/bytedance/sonic/internal/caching"
+	"github.com/bytedance/sonic/internal/cpu"
+	"github.com/bytedance/sonic/internal/jit"
+	"github.com/bytedance/sonic/internal/native"
+	"github.com/bytedance/sonic/internal/native/types"
+	"github.com/bytedance/sonic/internal/rt"
+	"github.com/bytedance/sonic/option"
+	"github.com/twitchyliquid64/golang-asm/obj"
+	"github.com/twitchyliquid64/golang-asm/obj/x86"
 )
 
 /** Register Allocations
@@ -882,15 +883,15 @@ func (self *_Assembler) more_fsm() {
 }
 
 func (self *_Assembler) skip_func(fn obj.Addr) {
-    key := "_skip_{n}"
-    self.Link(key)
+    // key := "_skip_{n}"
+    // self.Link(key)
     self.call_sf(fn)                                   // CALL_SF   skip_one
     self.Emit("CMPQ", _AX, jit.Imm(-int64(types.ERR_RECURSE_EXCEED_MAX)))
-    self.Sjmp("JNE", "_skip_end_{n}")
-    self.Byte(0x4c, 0x8d, 0x1d)                        // LEAQ ?(PC), R11
-    self.Sref(key, 4)
-    self.Sjmp("JMP", _LB_more_fsm)
-    self.Link("_skip_end_{n}")
+    self.Sjmp("JE", _LB_more_fsm)
+    // self.Byte(0x4c, 0x8d, 0x1d)                        // LEAQ ?(PC), R11
+    // self.Sref(key, 4)
+    // self.Sjmp("JMP", _LB_more_fsm)
+    // self.Link("_skip_end_{n}")
     self.Emit("MOVQ", _ARG_ic, _IC)                    // MOVQ ic<>+16(FP), IC
 }
 
@@ -1577,18 +1578,18 @@ func (self *_Assembler) _asm_OP_load(_ *_Instr) {
 }
 
 func (self *_Assembler) _asm_OP_save(_ *_Instr) {
-    key := "_save_end_{n}"
-    self.Emit("MOVQ", jit.Ptr(_ST, 24), _AX)
-    self.Emit("MOVQ", jit.Imm(_PtrBytes), _CX)
-    self.From("MULQ", _CX)
+    // key := "_save_end_{n}"
+    // self.Emit("MOVQ", jit.Ptr(_ST, 24), _AX)
+    // self.Emit("MOVQ", jit.Imm(_PtrBytes), _CX)
+    // self.From("MULQ", _CX)
     self.Emit("MOVQ", jit.Ptr(_ST, 0), _CX)             // MOVQ (ST), CX
     self.Emit("ADDQ", jit.Imm(_PtrBytes), _CX)          // ADDQ $8, R8
-    self.Emit("CMPQ", _CX, _AX)                         // CMPQ CX, ${_MaxStackBytes}
-    self.Sjmp("JBE"  , key)                             // JA   _save_end_
-    self.Byte(0x4c, 0x8d, 0x1d)                         // LEAQ ?(PC), R11
-    self.Sref(key, 4)
-    self.Sjmp("JMP", _LB_more_stack)
-    self.Link(key)
+    self.Emit("CMPQ", _CX, jit.Imm(int64(option.MaxDecodeStackSize*_PtrBytes)))                         // CMPQ CX, ${_MaxStackBytes}
+    self.Sjmp("JA"  , _LB_more_stack)                  // JA   _save_end_
+    // self.Byte(0x4c, 0x8d, 0x1d)                      // LEAQ ?(PC), R11
+    // self.Sref(key, 4)
+    // self.Sjmp("JMP", _LB_more_stack)
+    // self.Link(key)
     self.Emit("MOVQ", _CX, jit.Ptr(_ST, 0))             // MOVQ R8, (ST)
     self.Emit("MOVQ", jit.Ptr(_ST, 8), _R8)             // MOVQ 8(ST), R8
     self.WriteRecNotAX(0, _VP, jit.Sib(_R8, _CX, 1, -_PtrBytes), false, false) // MOVQ VP, -8(ST)(CX)
