@@ -1,16 +1,16 @@
 package issue_test
 
 import (
-	"bytes"
-	"fmt"
-	"os/exec"
-	"plugin"
-	"reflect"
-	"runtime"
-	"strings"
-	"testing"
+    `bytes`
+    `fmt`
+    `os/exec`
+    `plugin`
+    `reflect`
+    `runtime`
+    `strings`
+    `testing`
 
-	_ "github.com/bytedance/sonic"
+    _ `github.com/bytedance/sonic`
 )
 
 func init() {
