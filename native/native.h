@@ -128,5 +128,6 @@ double atof_native(const char *sp, ssize_t nb, char* dbuf, ssize_t cap);
 ssize_t utf8_validate(const char *sp, ssize_t nb);
 long validate_string(const GoString *src, long *p);
 long validate_one(const GoString *src, long *p, StateMachine *m);
+long string_length(const char* sp, size_t nb);
 
 #endif

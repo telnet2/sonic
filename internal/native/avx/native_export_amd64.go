@@ -43,3 +43,7 @@ var (
     S_skip_array  = _subr__skip_array
     S_skip_object = _subr__skip_object
 )
+
+var (
+    S_string_length = _subr__string_length
+)

@@ -563,3 +563,28 @@ func TestNative_SkipObject(t *testing.T) {
     __skip_object(&s, &p, &types.StateMachine{})
     assert.Equal(t, p, 15)
 }
+
+func TestNative_StringLength(t *testing.T) {
+    {
+        s := `{ "a": "hello", "b": null, "c": 123, "d": { "f": [ {"g": null, "h": 0 }]}} { "a": "hello", "b": null }"`
+        sp := (*rt.GoString)(unsafe.Pointer(&s))
+        r  := __string_length(sp.Ptr, sp.Len - 1);
+        assert.Equal(t, r, 19)
+        r  = __string_length(sp.Ptr, 0); // `{`
+        assert.Equal(t, r, 0)
+        r  = __string_length(sp.Ptr, 2); // `{ `
+        assert.Equal(t, r, 0)
+
+        r  = __string_length(sp.Ptr, 3); //  `{ "`
+        assert.Equal(t, r, -int(types.ERR_EOF))
+        r  = __string_length(sp.Ptr, sp.Len);
+        assert.Equal(t, r, -int(types.ERR_EOF))
+    }
+
+    {
+        s := `  " " Len1         \\\\\\\\"8LQ\\\"3\\"2RQ-Len10, \"1\\\\\\\\\\\"9""""4Quote-Len0, \"1            \\\\\\\\"8LQ\\\"3\\"2RQ-Len10, \"1\\\\\\\\\\\"9"""""5Quote\"1"RQ-Len9, Total len is 30`
+        sp := (*rt.GoString)(unsafe.Pointer(&s))
+        r  := __string_length(sp.Ptr, sp.Len);
+        assert.Equal(t, r, 30)
+    }
+}

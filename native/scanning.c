@@ -98,6 +98,8 @@ static inline int64_t advance_dword(const GoString *src, long *p, long dec, int6
     }
 }
 
+/** Value Scanning Routines **/
+
 static inline ssize_t advance_string(const GoString *src, long p, int64_t *ep) {
     char     ch;
     uint64_t es;
@@ -568,6 +570,185 @@ static inline ssize_t advance_validate_string(const GoString *src, long p, int64
     } else {
         return -ERR_EOF;
     }
+}
+
+long string_length(const char* sp, size_t nb) {
+    char     ch;
+    uint64_t es;
+    uint64_t fe;
+    uint64_t os;
+    uint64_t m0;
+    uint64_t m1;
+    uint64_t cr = 0;
+    long    ret = 0;
+    int     in  = 0; // flag of in string
+
+    if (unlikely(nb == 0)) {
+        return 0;
+    }
+
+    /* buffer pointers */
+    const char * ls = sp;
+
+#define ep_init()   *ep = -1;
+#define ep_setc()   ep_setx(sp - ss - 1)
+#define ep_setx(x)  if (*ep == -1) { *ep = (x); }
+
+#if USE_AVX2
+    /* initialize vectors */
+    __m256i v0;
+    __m256i v1;
+    __m256i cq = _mm256_set1_epi8('"');
+    __m256i cx = _mm256_set1_epi8('\\');
+
+    /* partial masks */
+    uint32_t s0, s1;
+    uint32_t t0, t1;
+#else
+    /* initialize vectors */
+    __m128i v0;
+    __m128i v1;
+    __m128i v2;
+    __m128i v3;
+    __m128i cq = _mm_set1_epi8('"');
+    __m128i cx = _mm_set1_epi8('\\');
+
+    /* partial masks */
+    uint32_t s0, s1, s2, s3;
+    uint32_t t0, t1, t2, t3;
+#endif
+
+#define m0_mask(add)                \
+    m1 &= ~cr;                      \
+    fe  = (m1 << 1) | cr;           \
+    os  = (m1 & ~fe) & ODD_MASK;    \
+    es  = add(os, m1, &cr) << 1;    \
+    m0 &= ~(fe & (es ^ EVEN_MASK));
+
+    /* 64-byte SIMD loop */
+    while (likely(nb >= 64)) {
+#if USE_AVX2
+        v0 = _mm256_loadu_si256   ((const void *)(sp +  0));
+        v1 = _mm256_loadu_si256   ((const void *)(sp + 32));
+        s0 = _mm256_get_mask(v0, cq);
+        s1 = _mm256_get_mask(v1, cq);
+        t0 = _mm256_get_mask(v0, cx);
+        t1 = _mm256_get_mask(v1, cx);
+        m0 = ((uint64_t)s1 << 32) | (uint64_t)s0;
+        m1 = ((uint64_t)t1 << 32) | (uint64_t)t0;
+#else
+        v0 = _mm_loadu_si128   ((const void *)(sp +  0));
+        v1 = _mm_loadu_si128   ((const void *)(sp + 16));
+        v2 = _mm_loadu_si128   ((const void *)(sp + 32));
+        v3 = _mm_loadu_si128   ((const void *)(sp + 48));
+        s0 = _mm_get_mask(v0, cq);
+        s1 = _mm_get_mask(v1, cq);
+        s2 = _mm_get_mask(v2, cq);
+        s3 = _mm_get_mask(v3, cq);
+        t0 = _mm_get_mask(v0, cx);
+        t1 = _mm_get_mask(v1, cx);
+        t2 = _mm_get_mask(v2, cx);
+        t3 = _mm_get_mask(v3, cx);
+        m0 = ((uint64_t)s3 << 48) | ((uint64_t)s2 << 32) | ((uint64_t)s1 << 16) | (uint64_t)s0;
+        m1 = ((uint64_t)t3 << 48) | ((uint64_t)t2 << 32) | ((uint64_t)t1 << 16) | (uint64_t)t0;
+
+#endif
+
+        /** mask all the escaped quotes */
+        if (unlikely(m1 != 0 || cr != 0)) {
+            m0_mask(add64)
+        }
+
+        /* accumulate the distance of two string quotes. 
+         * Example:
+         * json: {"hello\\\"":"world"}
+         * m0  : 010000000001010000010
+         */
+        while (m0 != 0) {
+            ret += in ?  __builtin_ctzll(m0) : - __builtin_ctzll(m0) - 1;
+            m0  = _blsr_u64(m0); // clear lowest bits
+            in  = !in;
+        }
+        ret += in ? 64 : 0;
+
+        /* move to the next block */
+        sp += 64;
+        nb -= 64;
+    }
+
+    /* 32-byte SIMD round */
+    if (likely(nb >= 32)) {
+#if USE_AVX2
+        v0 = _mm256_loadu_si256   ((const void *)sp);
+        s0 = _mm256_get_mask (v0, cq);
+        t0 = _mm256_get_mask (v0, cx);
+        m0 = (uint64_t)s0;
+        m1 = (uint64_t)t0;
+#else
+        v0 = _mm_loadu_si128   ((const void *)(sp +  0));
+        v1 = _mm_loadu_si128   ((const void *)(sp + 16));
+        s0 = _mm_get_mask(v0, cq);
+        s1 = _mm_get_mask(v1, cq);
+        t0 = _mm_get_mask(v0, cx);
+        t1 = _mm_get_mask(v1, cx);
+        m0 = ((uint64_t)s1 << 16) | (uint64_t)s0;
+        m1 = ((uint64_t)t1 << 16) | (uint64_t)t0;
+#endif
+        /** mask all the escaped quotes */
+        if (unlikely(m1 != 0 || cr != 0)) {
+            m0_mask(add32)
+        }
+
+        /* accumulat the distance of two string quotes */
+        while (m0 != 0) {
+            ret += in ?  __builtin_ctzll(m0) : - __builtin_ctzll(m0) - 1;
+            m0  = _blsr_u64(m0);
+            in  = !in;
+        }
+        ret += in ? 32 : 0;
+
+        /* move to the next block */
+        sp += 32;
+        nb -= 32;
+    }
+
+    ls = sp;
+
+    /* check for carry */
+    if (unlikely(cr != 0)) {
+        if (nb == 0) {
+            return -ERR_EOF;
+        } else {
+            sp++, nb--;
+        }
+    }
+
+    /* handle the remaining bytes with scalar code */
+    while (nb-- > 0) {
+        ch = *sp++;
+        if (ch == '"') {
+            ret += in ? sp - ls - 1 : 0;
+            ls  = in ? ls : sp - 1;
+            in  = !in;
+        } else if (unlikely(ch == '\\')) {
+            if (nb == 0) {
+                return -ERR_EOF;
+            } else {
+                sp++, nb--;
+            }
+        }
+    }
+
+#undef ep_init
+#undef ep_setc
+#undef ep_setx
+#undef m0_mask
+
+    /* check unclosed string */
+    if (in) {
+        return -ERR_EOF;
+    }
+    return ret;
 }
 
 /** Value Scanning Routines **/
