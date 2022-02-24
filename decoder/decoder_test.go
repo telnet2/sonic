@@ -23,6 +23,7 @@ import (
     `runtime`
     `runtime/debug`
     `sync`
+    `unsafe`
 
     `github.com/davecgh/go-spew/spew`
     gojson `github.com/goccy/go-json`
@@ -30,6 +31,7 @@ import (
     `github.com/stretchr/testify/assert`
     `github.com/stretchr/testify/require`
     `github.com/bytedance/sonic/internal/rt`
+    `github.com/bytedance/sonic/internal/native`
 )
 
 func TestMain(m *testing.M) {
@@ -343,5 +345,51 @@ func BenchmarkSkip_Sonic(b *testing.B) {
     b.ResetTimer()
     for i:=0; i<b.N; i++ {
         _, _ = Skip(data)
+    }
+}
+
+func BenchmarkStringLength_Sonic(b *testing.B) {
+    data := TwitterJson
+    sv := (*rt.GoString)(unsafe.Pointer(&data))
+    b.SetBytes(int64(len(TwitterJson)))
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        _ = native.StringLength(sv.Ptr, sv.Len)
+    }
+}
+
+func BenchmarkStringLengthWithCopy_Sonic(b *testing.B) {
+    var data = rt.Str2Mem(TwitterJson)
+    sv := (*rt.GoSlice)(unsafe.Pointer(&data))
+    sl := native.StringLength(sv.Ptr, sv.Len)
+    if (sl < 0) {
+        b.Fatalf("json has errors")
+    }
+    dest := make([]byte, sl)
+    b.SetBytes(int64(len(TwitterJson)))
+    b.ResetTimer()
+    step := 20
+    for i := 0; i < b.N; i++ {
+        for j := 0; j < sl / step; j++ {
+            copy(dest[j * step: (j + 1) * step], data[j * step: (j + 1) * step])
+        }
+    }
+}
+
+func BenchmarkStringLengthOnlyCopy_Sonic(b *testing.B) {
+    var data = rt.Str2Mem(TwitterJson)
+    sv := (*rt.GoSlice)(unsafe.Pointer(&data))
+    sl := native.StringLength(sv.Ptr, sv.Len)
+    if (sl < 0) {
+        b.Fatalf("json has errors")
+    }
+    dest := make([]byte, sl)
+    b.SetBytes(int64(len(TwitterJson)))
+    b.ResetTimer()
+    step := 20
+    for i := 0; i < b.N; i++ {
+        for j := 0; j < sl / step; j++ {
+            copy(dest[j * step: (j + 1) * step], data[j * step: (j + 1) * step])
+        }
     }
 }

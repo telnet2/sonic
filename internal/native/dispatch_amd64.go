@@ -102,6 +102,11 @@ func I64toa(out *byte, val int64) (ret int)
 //goland:noinspection GoUnusedParameter
 func U64toa(out *byte, val uint64) (ret int)
 
+//go:nosplit
+//go:noescape
+//goland:noinspection GoUnusedParameter
+func StringLength(s unsafe.Pointer, nb int) (ret int)
+
 func useAVX() {
     S_f64toa        = avx.S_f64toa
     S_i64toa        = avx.S_i64toa

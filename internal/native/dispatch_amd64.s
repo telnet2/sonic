@@ -71,3 +71,9 @@ TEXT ·U64toa(SB), NOSPLIT, $0 - 32
     JE   2(PC)
     JMP  github·com∕bytedance∕sonic∕internal∕native∕avx2·__u64toa(SB)
     JMP  github·com∕bytedance∕sonic∕internal∕native∕avx·__u64toa(SB)
+
+TEXT ·StringLength(SB), NOSPLIT, $0 - 24
+    CMPB github·com∕bytedance∕sonic∕internal∕cpu·HasAVX2(SB), $0
+    JE   2(PC)
+    JMP  github·com∕bytedance∕sonic∕internal∕native∕avx2·__string_length(SB)
+    JMP  github·com∕bytedance∕sonic∕internal∕native∕avx·__string_length(SB)
