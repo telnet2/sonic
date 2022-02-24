@@ -577,6 +577,7 @@ func TestNative_StringLength(t *testing.T) {
         r  = __string_length(sp.Ptr, 2); // `{ `
         assert.Equal(t, r, 0)
 
+        // check unclosed string errors, e.g. `"`
         r  = __string_length(sp.Ptr, 3); //  `{ "`
         assert.Equal(t, r, -int(types.ERR_EOF))
         r  = __string_length(sp.Ptr, sp.Len);
@@ -588,5 +589,12 @@ func TestNative_StringLength(t *testing.T) {
         sp := (*rt.GoString)(unsafe.Pointer(&s))
         r  := __string_length(sp.Ptr, sp.Len);
         assert.Equal(t, r, 30)
+
+        r  = __string_length(sp.Ptr, 27); //  `  " " Len1         \\\\\\\\` (8\)
+        assert.Equal(t, r, 1))
+    
+        // check unclosed escaped errors, e.g. `\`
+        r  = __string_length(sp.Ptr, 26);
+        assert.Equal(t, r, -int(types.ERR_EOF))
     }
 }
