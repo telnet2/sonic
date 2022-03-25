@@ -421,8 +421,7 @@ func BenchmarkParseOne_Sonic(b *testing.B) {
 }
 
 func BenchmarkParseOne_FastJson(b *testing.B) {
-	data := []byte(_TwitterJson)
-	ast, _ := fastjson.ParseBytes(data)
+	ast, _ := fastjson.Parse(_TwitterJson)
 	node := ast.GetArray("statuses")[2].GetInt64("id")
 	if node != 249289491129438208 {
 		b.Fail()
@@ -430,7 +429,7 @@ func BenchmarkParseOne_FastJson(b *testing.B) {
 	b.SetBytes(int64(len(_TwitterJson)))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ast, _ := fastjson.ParseBytes(data)
+		ast, _ := fastjson.Parse(_TwitterJson)
 		node := ast.GetArray("statuses")[2].GetInt64("id")
 		if node != 249289491129438208 {
 			b.Fail()
@@ -559,9 +558,8 @@ func BenchmarkParseSeven_FastJson(b *testing.B) {
 			b.Fail()
 		}
 	}
-	data := []byte(_TwitterJson)
 	for i := 0; i < b.N; i++ {
-		ast, _ := fastjson.ParseBytes(data)
+		ast, _ := fastjson.Parse(_TwitterJson)
 		node := ast.GetArray("statuses")[3].Get("id")
 		exists(node)
 		node = ast.GetArray("statuses")[3].Get("user", "entities", "description")
@@ -649,15 +647,14 @@ func BenchmarkParseSeven_Parallel_Sonic(b *testing.B) {
 func BenchmarkParseSeven_Parallel_FastJson(b *testing.B) {
 	b.SetBytes(int64(len(_TwitterJson)))
 	b.ResetTimer()
-	exists := func(v *fastjson.Value) {
-		if !v.Exists() {
+	exists := func(node *fastjson.Value) {
+		if !node.Exists() {
 			b.Fail()
 		}
 	}
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			data := []byte(_TwitterJson)
-			ast, _ := fastjson.ParseBytes(data)
+			ast, _ := fastjson.Parse(_TwitterJson)
 			node := ast.GetArray("statuses")[3].Get("id")
 			exists(node)
 			node = ast.GetArray("statuses")[3].Get("user", "entities", "description")
